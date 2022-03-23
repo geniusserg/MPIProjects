@@ -1,4 +1,4 @@
-﻿#define N 1600
+﻿#define N 1000000
 #define PROPORTION 20
 
 #include <stdlib.h>
@@ -36,13 +36,13 @@ bool check_sorted(int s, double* vectort) {
 	return true;
 }
 int wasSortedForIter = 0;
-
+int recvbuff = 0;
 
 void sort(double* tVector, long long int size) {
-	//if (!check_sorted(size, tVector) ){
+	if (!check_sorted(size, tVector) ){
 		qsort(tVector, size, sizeof(double), compare);
-	//	wasSortedForIter += 1;
-	//}
+		wasSortedForIter += 1;
+	}
 }
 
 int main(int argc, char** argv) {
@@ -72,8 +72,8 @@ int main(int argc, char** argv) {
 	if (p == 0) {
 		p = 1;
 	}
-
-	for (int step = 0; step < 100 ;step+=1) {
+	long long step = 0;
+	while (true){
 		wasSortedForIter = 0;
 		if (rank % 2 == 0) {
 			if (rank == size - 2) {
@@ -97,40 +97,40 @@ int main(int argc, char** argv) {
 				MPI_Recv(vWork, p, MPI_DOUBLE, rank - 1, 1, MPI_COMM_WORLD, &mStatus);
 			}
 		}
-		MPI_Barrier(MPI_COMM_WORLD);
+
 		if (rank % 2 != 0) {
-			if (rank == size - 1) {
-				continue;
+			if (rank != size - 1) {
+				MPI_Recv(vWork + subvector_size, p, MPI_DOUBLE, rank + 1, 2, MPI_COMM_WORLD, &mStatus);
+				sort(vWork, subvector_size + p);
+				MPI_Send(vWork + subvector_size, p, MPI_DOUBLE, rank + 1, 3, MPI_COMM_WORLD);
 			}
-			MPI_Recv(vWork + subvector_size, p, MPI_DOUBLE, rank + 1, 2, MPI_COMM_WORLD, &mStatus);
-			sort(vWork, subvector_size+p);
-			MPI_Send(vWork + subvector_size, p, MPI_DOUBLE, rank + 1, 3, MPI_COMM_WORLD);
 		}
 		else {
-			if (rank == 0) {
-				continue;
+			if (rank != 0) {
+				MPI_Send(vWork, p, MPI_DOUBLE, rank - 1, 2, MPI_COMM_WORLD);
+				MPI_Recv(vWork, p, MPI_DOUBLE, rank - 1, 3, MPI_COMM_WORLD, &mStatus);
 			}
-			MPI_Send(vWork, p, MPI_DOUBLE, rank - 1, 2, MPI_COMM_WORLD);
-			MPI_Recv(vWork, p, MPI_DOUBLE, rank - 1, 3, MPI_COMM_WORLD, &mStatus);
 		}
+
 		MPI_Barrier(MPI_COMM_WORLD);
-		if (wasSortedForIter == 0){
+		MPI_Allreduce(&wasSortedForIter, &recvbuff, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+		if (recvbuff == 0) {
 			break;
 		}
+		step += 1;
 	}
 
-	MPI_Barrier(MPI_COMM_WORLD);
 	MPI_Gather(vWork, subvector_size, MPI_DOUBLE, vResult+(rank*subvector_size), subvector_size, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 	if (rank == 0) {
-		print_vector(N, vResult);
-		/*
+		//print_vector(N, vResult);
+		
 		for (int i = 0; i < N; i++) {
 			if (vResult[i] != i + 1) {
 				std::cout << "ERRORR!!! NOT SORTED" << std::endl;
 			}
 		}
-		*/
+		
 		double end = MPI_Wtime();
 		std::cout << end - start;
 	}
