@@ -1,4 +1,5 @@
-﻿#define N 16
+﻿#define N 1600
+#define PROPORTION 20
 
 #include <stdlib.h>
 #include <iostream>
@@ -11,8 +12,8 @@ int period[2] = { 0, 0 };
 int coords[2];
 MPI_Comm com, row_comm, col_comm;
 
-double* vectorTemp;
-double* vectorOriginal;
+double* vResult;
+double* vWork;
 
 void print_vector(int s, double* vectort) {
 	for (int i = 0; i < s; i++) {
@@ -21,21 +22,27 @@ void print_vector(int s, double* vectort) {
 	std::cout << std::endl;
 }
 
-int compare(const void* x1, const void* x2)   // функция сравнения элементов массива
+int compare(const void* x1, const void* x2)
 {
-	return ( *(double*)x1 - *(double*)x2);              // если результат вычитания равен 0, то числа равны, < 0: x1 < x2; > 0: x1 > x2
+	return (*(double*)x1 - *(double*)x2);
 }
 
-void prepare_block(int a, double* tVector, double* tVectorOrig) {
-	for (int i = a*subvector_size; i < a * subvector_size + subvector_size; i++) {
-		tVector[i-a * subvector_size] = tVectorOrig[i];
+bool check_sorted(int s, double* vectort) {
+	for (int i = 1; i < s-1; i++) {
+		if (vectort[i] <= vectort[i - 1]) {
+			return false;
+		}
 	}
+	return true;
 }
+int wasSortedForIter = 0;
 
-void populate_block(int a, double* tVector, double* tVectorOrig) {
-	for (int i = a * subvector_size; i < a * subvector_size + subvector_size; i++) {
-		tVectorOrig[i] = tVector[i - a * subvector_size];
-	}
+
+void sort(double* tVector, long long int size) {
+	//if (!check_sorted(size, tVector) ){
+		qsort(tVector, size, sizeof(double), compare);
+	//	wasSortedForIter += 1;
+	//}
 }
 
 int main(int argc, char** argv) {
@@ -45,53 +52,85 @@ int main(int argc, char** argv) {
 	double start = MPI_Wtime();
 	subvector_size = N / size;
 
-
-	//prepare data
-	if (rank == 0) {
-		vectorOriginal = new double[N * N];
-		for (int i = 0; i < N; i++) {
-			vectorOriginal[i] = i;
-		}
+	vWork = new double[2*subvector_size];
+	vResult = new double[N];
+	for (int i = 0; i < subvector_size; i++) {
+		vWork[i] = N - subvector_size * rank - i;
+	}
+	for (int i = subvector_size; i < subvector_size*2; i++) {
+		vWork[i] = 0;
 	}
 
-	vectorTemp = new double[subvector_size * subvector_size];
-	for (int i = 0; i < subvector_size; i++) {
-		vectorTemp[i] = 0;
+	if (rank == 0) {
+		for (int i = 0; i < N; i++) {
+			vResult[i] = 0;
+		}
 	}
 	MPI_Status mStatus;
 
-	// v distribution for all processes
-	if (rank == 0) {
-		for (int i = 0; i < size; i++) {
-			if (i == 0) continue;
-			prepare_block(i,  vectorTemp, vectorOriginal);
-			MPI_Send(vectorTemp, subvector_size, MPI_DOUBLE, i, 1, MPI_COMM_WORLD);
+	int p = subvector_size * ((double)PROPORTION / 100.0);
+	if (p == 0) {
+		p = 1;
+	}
+
+	for (int step = 0; step < 100 ;step+=1) {
+		wasSortedForIter = 0;
+		if (rank % 2 == 0) {
+			if (rank == size - 2) {
+				MPI_Recv(vWork + subvector_size, subvector_size, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, &mStatus);
+				sort(vWork, subvector_size*2);
+				MPI_Send(vWork + subvector_size, subvector_size, MPI_DOUBLE, rank + 1, 1, MPI_COMM_WORLD);
+			}
+			else {
+				MPI_Recv(vWork + subvector_size, p, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, &mStatus);
+				sort(vWork, subvector_size+p);
+				MPI_Send(vWork + subvector_size, p, MPI_DOUBLE, rank + 1, 1, MPI_COMM_WORLD);
+			}
 		}
-		prepare_block(0, vectorTemp, vectorOriginal);
-	}
-
-	// receive v
-	if (rank != 0) {
-		MPI_Recv(vectorTemp, subvector_size, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, &mStatus);
-	}
-
-	qsort(vectorTemp, subvector_size, sizeof(double), compare);
-
-	// send v'
-	if (rank != 0) {
-		print_vector(subvector_size, vectorTemp);
-		MPI_Send(vectorTemp, subvector_size, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
-	}
-
-	// gather and construct C matrix
-	if (rank == 0) {
-		populate_block(0, vectorTemp, vectorOriginal);
-		for (int i = 0; i < size; i++) {
-			if (i == 0) continue;
-			MPI_Recv(vectorTemp, subvector_size, MPI_DOUBLE, i, 1, MPI_COMM_WORLD, &mStatus);
-			populate_block(i, vectorTemp, vectorOriginal);
+		else{
+			if (rank == size - 1) {
+				MPI_Send(vWork, subvector_size, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+				MPI_Recv(vWork, subvector_size, MPI_DOUBLE, rank - 1, 1, MPI_COMM_WORLD, &mStatus);
+			}
+			else {
+				MPI_Send(vWork, p, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+				MPI_Recv(vWork, p, MPI_DOUBLE, rank - 1, 1, MPI_COMM_WORLD, &mStatus);
+			}
 		}
-		delete[] vectorOriginal;
+		MPI_Barrier(MPI_COMM_WORLD);
+		if (rank % 2 != 0) {
+			if (rank == size - 1) {
+				continue;
+			}
+			MPI_Recv(vWork + subvector_size, p, MPI_DOUBLE, rank + 1, 2, MPI_COMM_WORLD, &mStatus);
+			sort(vWork, subvector_size+p);
+			MPI_Send(vWork + subvector_size, p, MPI_DOUBLE, rank + 1, 3, MPI_COMM_WORLD);
+		}
+		else {
+			if (rank == 0) {
+				continue;
+			}
+			MPI_Send(vWork, p, MPI_DOUBLE, rank - 1, 2, MPI_COMM_WORLD);
+			MPI_Recv(vWork, p, MPI_DOUBLE, rank - 1, 3, MPI_COMM_WORLD, &mStatus);
+		}
+		MPI_Barrier(MPI_COMM_WORLD);
+		if (wasSortedForIter == 0){
+			break;
+		}
+	}
+
+	MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Gather(vWork, subvector_size, MPI_DOUBLE, vResult+(rank*subvector_size), subvector_size, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+	if (rank == 0) {
+		print_vector(N, vResult);
+		/*
+		for (int i = 0; i < N; i++) {
+			if (vResult[i] != i + 1) {
+				std::cout << "ERRORR!!! NOT SORTED" << std::endl;
+			}
+		}
+		*/
 		double end = MPI_Wtime();
 		std::cout << end - start;
 	}
