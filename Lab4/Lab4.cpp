@@ -21,6 +21,11 @@ void print_vector(int s, double* vectort) {
 	std::cout << std::endl;
 }
 
+int compare(const void* x1, const void* x2)   // функция сравнения элементов массива
+{
+	return ( *(double*)x1 - *(double*)x2);              // если результат вычитания равен 0, то числа равны, < 0: x1 < x2; > 0: x1 > x2
+}
+
 void prepare_block(int a, double* tVector, double* tVectorOrig) {
 	for (int i = a*subvector_size; i < a * subvector_size + subvector_size; i++) {
 		tVector[i-a * subvector_size] = tVectorOrig[i];
@@ -45,7 +50,7 @@ int main(int argc, char** argv) {
 	if (rank == 0) {
 		vectorOriginal = new double[N * N];
 		for (int i = 0; i < N; i++) {
-			vectorOriginal[i] = 5;
+			vectorOriginal[i] = i;
 		}
 	}
 
@@ -70,7 +75,7 @@ int main(int argc, char** argv) {
 		MPI_Recv(vectorTemp, subvector_size, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, &mStatus);
 	}
 
-	// Do some shit with vector
+	qsort(vectorTemp, subvector_size, sizeof(double), compare);
 
 	// send v'
 	if (rank != 0) {
